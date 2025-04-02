@@ -8,6 +8,7 @@ group "linux" {
     "debian_jdk21",
     "debian_slim_jdk17",
     "debian_slim_jdk21",
+    "debian_inter6_jdk17",
     "rhel_ubi9_jdk17",
     "rhel_ubi9_jdk21",
   ]
@@ -92,6 +93,10 @@ variable "JAVA21_VERSION" {
 
 variable "BOOKWORM_TAG" {
   default = "20250317"
+}
+
+variable "TAG_VERSION" {
+  default = "v1"
 }
 
 # ----  user-defined functions ----
@@ -252,6 +257,23 @@ target "debian_slim_jdk21" {
     tag_lts(false, "lts-slim-jdk21"),
   ]
   platforms = ["linux/amd64", "linux/arm64"]
+}
+
+target "debian_inter6_jdk17" {
+  dockerfile = "debian/bookworm-inter6/hotspot/Dockerfile"
+  context    = "."
+  args = {
+    JENKINS_VERSION    = JENKINS_VERSION
+    JENKINS_SHA        = JENKINS_SHA
+    COMMIT_SHA         = COMMIT_SHA
+    PLUGIN_CLI_VERSION = PLUGIN_CLI_VERSION
+    BOOKWORM_TAG       = BOOKWORM_TAG
+    JAVA_VERSION       = JAVA17_VERSION
+  }
+  tags = [
+    tag(true, "inter6-jdk17-${TAG_VERSION}"),
+  ]
+  platforms = ["linux/amd64"]
 }
 
 target "rhel_ubi9_jdk17" {
