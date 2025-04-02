@@ -8,7 +8,7 @@ group "linux" {
     "debian_jdk21",
     "debian_slim_jdk17",
     "debian_slim_jdk21",
-    "debian_inter6_jdk17",
+    "debian_inter6_jdk21",
     "rhel_ubi9_jdk17",
     "rhel_ubi9_jdk21",
   ]
@@ -259,7 +259,7 @@ target "debian_slim_jdk21" {
   platforms = ["linux/amd64", "linux/arm64"]
 }
 
-target "debian_inter6_jdk17" {
+target "debian_inter6_jdk21" {
   dockerfile = "debian/bookworm-inter6/hotspot/Dockerfile"
   context    = "."
   args = {
@@ -268,10 +268,10 @@ target "debian_inter6_jdk17" {
     COMMIT_SHA         = COMMIT_SHA
     PLUGIN_CLI_VERSION = PLUGIN_CLI_VERSION
     BOOKWORM_TAG       = BOOKWORM_TAG
-    JAVA_VERSION       = JAVA17_VERSION
+    JAVA_VERSION       = JAVA21_VERSION
   }
   tags = [
-    tag(true, "inter6-jdk17-${TAG_VERSION}"),
+    tag(true, "inter6-jdk21-${TAG_VERSION}"),
   ]
   platforms = ["linux/amd64"]
 }
