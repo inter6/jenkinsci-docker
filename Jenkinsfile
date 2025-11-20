@@ -22,9 +22,9 @@ def SIMULATE_LTS_BUILD = false
 if (SIMULATE_LTS_BUILD) {
     envVars = [
         'PUBLISH=false',
-        'TAG_NAME=2.462.3',
-        'JENKINS_VERSION=2.462.3',
-        'JENKINS_SHA=3e53b52a816405e3b10ad07f1c48cd0cb5cb3f893207ef7f9de28415806b93c1'
+        'TAG_NAME=2.504.3',
+        'JENKINS_VERSION=2.504.3',
+        'WAR_SHA=ea8883431b8b5ef6b68fe0e5817c93dc0a11def380054e7de3136486796efeb0'
     ]
 }
 
@@ -50,7 +50,7 @@ stage('Build') {
                             */
                             stage("Build ${imageType}") {
                                 infra.withDockerCredentials {
-                                    powershell './make.ps1'
+                                    powershell './make.ps1 build'
                                 }
                             }
 
@@ -80,11 +80,16 @@ stage('Build') {
                             // Only publish when a tag triggered the build & the publication is enabled (ie not simulating a LTS)
                             if (env.TAG_NAME && (env.PUBLISH == 'true')) {
                                 // Split to ensure any suffix is not taken in account (but allow suffix tags to trigger rebuilds)
-                                jenkins_version = env.TAG_NAME.split('-')[0]
-                                withEnv(["JENKINS_VERSION=${jenkins_version}"]) {
+                                String jenkins_version = env.TAG_NAME.split('-')[0]
+                                // Setting WAR_URL to download war from Artifactory instead of mirrors on publication from trusted.ci.jenkins.io
+                                withEnv([
+                                    "JENKINS_VERSION=${jenkins_version}",
+                                    "WAR_URL=https://repo.jenkins-ci.org/public/org/jenkins-ci/main/jenkins-war/${jenkins_version}/jenkins-war-${jenkins_version}.war"
+                                ]) {
                                     stage('Publish') {
                                         infra.withDockerCredentials {
                                             withEnv(['DOCKERHUB_ORGANISATION=jenkins', 'DOCKERHUB_REPO=jenkins']) {
+                                                powershell './make.ps1 build'
                                                 powershell './make.ps1 publish'
                                             }
                                         }
@@ -169,9 +174,13 @@ stage('Build') {
             // Only publish when a tag triggered the build
             if (env.TAG_NAME) {
                 // Split to ensure any suffix is not taken in account (but allow suffix tags to trigger rebuilds)
-                jenkins_version = env.TAG_NAME.split('-')[0]
+                String jenkins_version = env.TAG_NAME.split('-')[0]
                 builds['linux'] = {
-                    withEnv(["JENKINS_VERSION=${jenkins_version}"]) {
+                    // Setting WAR_URL to download war from Artifactory instead of mirrors on publication from trusted.ci.jenkins.io
+                    withEnv([
+                        "JENKINS_VERSION=${jenkins_version}",
+                        "WAR_URL=https://repo.jenkins-ci.org/public/org/jenkins-ci/main/jenkins-war/${jenkins_version}/jenkins-war-${jenkins_version}.war"
+                    ]) {
                         nodeWithTimeout('docker') {
                             stage('Checkout') {
                                 checkout scm

@@ -37,8 +37,15 @@ $env:JENKINS_VERSION = "$JenkinsVersion"
 # Compared to weekly releases, LTS releases include an additional build number in their version
 # Note: the ':' separator is included as trying to set an environment variable to empty on Windows unset it.
 $env:SEPARATOR_LTS_PREFIX = ':'
+$releaseLine = 'war'
 if ($JenkinsVersion.Split('.').Count -eq 3) {
     $env:SEPARATOR_LTS_PREFIX = ':lts-'
+    $releaseLine = 'war-stable'
+}
+
+# If there is no WAR_URL set, using get.jenkins.io URL depending on the release line
+if([String]::IsNullOrWhiteSpace($env:WAR_URL)) {
+    $env:WAR_URL = 'https://get.jenkins.io/{0}/{1}/jenkins.war' -f $releaseLine, $env:JENKINS_VERSION
 }
 
 $items = $ImageType.Split('-')
@@ -50,10 +57,10 @@ if ($items[1] -eq 'ltsc2019') {
     $env:TOOLS_WINDOWS_VERSION = '1809'
 }
 
-# Retrieve the sha256 corresponding to the JENKINS_VERSION
-$jenkinsShaURL = 'https://repo.jenkins-ci.org/releases/org/jenkins-ci/main/jenkins-war/{0}/jenkins-war-{0}.war.sha256' -f $env:JENKINS_VERSION
+# Retrieve the sha256 corresponding to the war file
+$warShaURL = '{0}.sha256' -f $env:WAR_URL
 $webClient = New-Object System.Net.WebClient
-$env:JENKINS_SHA = $webClient.DownloadString($jenkinsShaURL).ToUpper()
+$env:WAR_SHA = $webClient.DownloadString($warShaURL).Split(' ')[0]
 
 $env:COMMIT_SHA=$(git rev-parse HEAD)
 
@@ -63,15 +70,18 @@ $baseDockerBuildCmd = '{0} build --parallel --pull' -f $baseDockerCmd
 Write-Host "= PREPARE: List of $Organisation/$Repository images and tags to be processed:"
 Invoke-Expression "$baseDockerCmd config"
 
-Write-Host '= BUILD: Building all images...'
-switch ($DryRun) {
-    $true { Write-Host "(dry-run) $baseDockerBuildCmd" }
-    $false { Invoke-Expression $baseDockerBuildCmd }
-}
-Write-Host '= BUILD: Finished building all images.'
+if($target -eq 'build') {
+    Write-Host '= BUILD: Building all images...'
+    switch ($DryRun) {
+        $true { Write-Host "(dry-run) $baseDockerBuildCmd" }
+        $false { Invoke-Expression $baseDockerBuildCmd }
+    }
+    Write-Host '= BUILD: Finished building all images.'
 
-if($lastExitCode -ne 0 -and !$DryRun) {
-    exit $lastExitCode
+    if($lastExitCode -ne 0 -and !$DryRun) {
+        Write-Error "= BUILD: failed!"
+        exit $lastExitCode
+    }
 }
 
 function Test-Image {
