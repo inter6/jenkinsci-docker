@@ -1,8 +1,9 @@
-ARG BOOKWORM_TAG=20250317
+ARG DEBIAN_RELEASE_LINE=trixie
+ARG DEBIAN_VERSION=20260623
+ARG DEBIAN_VARIANT="-slim"
+FROM debian:"${DEBIAN_RELEASE_LINE}-${DEBIAN_VERSION}${DEBIAN_VARIANT}" AS jre-and-war
 
-FROM debian:bookworm-"${BOOKWORM_TAG}" AS jre-build
-
-ARG JAVA_VERSION=17.0.14_7
+ARG JAVA_VERSION=25.0.3_9
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
@@ -13,6 +14,7 @@ RUN apt-get update \
   && apt-get install --no-install-recommends -y \
     ca-certificates \
     curl \
+    gnupg \
     jq \
   && rm -rf /var/lib/apt/lists/* \
   && /usr/bin/jdk-download.sh
@@ -22,29 +24,45 @@ ENV PATH="/opt/jdk-${JAVA_VERSION}/bin:${PATH}"
 # Generate smaller java runtime without unneeded files
 # for now we include the full module path to maintain compatibility
 # while still saving space (approx 200mb from the full distribution)
-RUN case "$(jlink --version 2>&1)" in \
-      "17."*) set -- "--compress=2" ;; \
-      # the compression argument is different for JDK21
-      "21."*) set -- "--compress=zip-6" ;; \
-      *) echo "ERROR: unmanaged jlink version pattern" && exit 1 ;; \
-    esac; \
-    jlink \
-      --strip-java-debug-attributes \
-      "$1" \
-      --add-modules ALL-MODULE-PATH \
-      --no-man-pages \
-      --no-header-files \
-      --output /javaruntime
+# hadolint ignore=SC2086
+RUN java_major_version="$(jlink --version 2>&1 | cut -c1-2)"; \
+    if [ "$java_major_version" = "25" ]; then \
+      cp -r "/opt/jdk-${JAVA_VERSION}" /javaruntime; \
+    else \
+      case "$java_major_version" in \
+        "21") options="--compress=zip-6" ;; \
+        *) echo "ERROR: unmanaged jlink version pattern" && exit 1 ;; \
+      esac; \
+      jlink \
+        --strip-java-debug-attributes \
+        ${options} \
+        --add-modules ALL-MODULE-PATH \
+        --no-man-pages \
+        --no-header-files \
+        --output /javaruntime; \
+    fi
 
-FROM debian:bookworm-"${BOOKWORM_TAG}" AS controller
+# Jenkins version being bundled in this docker image
+ARG JENKINS_VERSION=2.572
+# Can be used to customize where jenkins.war get downloaded from
+ARG WAR_URL=https://get.jenkins.io/war/${JENKINS_VERSION}/jenkins.war
+
+COPY jenkins.io-2026.key /war/jenkins-key.pub
+
+# Not using ADD as it does not check Last-Modified header
+# see https://github.com/docker/docker/issues/8331
+RUN curl -fsSL "${WAR_URL}" -o /war/jenkins.war \
+  && curl -fsSL "${WAR_URL}.asc" -o /war/jenkins.war.asc \
+  && gpg --import /war/jenkins-key.pub \
+  && gpg --verify --trust-model direct /war/jenkins.war.asc /war/jenkins.war
+
+FROM debian:"${DEBIAN_RELEASE_LINE}-${DEBIAN_VERSION}${DEBIAN_VARIANT}" AS controller
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
     git \
-    gnupg \
-    gpg \
     libfontconfig1 \
     libfreetype6 \
     procps \
@@ -55,20 +73,25 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 # inter6 - start
-RUN echo "deb http://ftp.debian.org/debian/ stable main contrib non-free" > /etc/apt/sources.list \
-  && apt update \
-  && apt upgrade
-RUN apt-get install -y build-essential python-is-python3 ffmpeg
+# Enable contrib/non-free components and install extra build/media tooling
+RUN sed -i 's/^Components: main$/Components: main contrib non-free non-free-firmware/' /etc/apt/sources.list.d/debian.sources \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends \
+    build-essential \
+    python-is-python3 \
+    ffmpeg \
+  && rm -rf /var/lib/apt/lists/*
 # inter6 - end
 
 # Git LFS is not available from a package manager on all the platforms we support
 # Download and unpack the tar.gz distribution
-ARG GIT_LFS_VERSION=3.6.1
+ARG GIT_LFS_VERSION=3.7.1
 # hadolint ignore=DL4006
 RUN arch=$(uname -m | sed -e 's/x86_64/amd64/g' -e 's/aarch64/arm64/g') \
   && curl -L -s -o git-lfs.tgz "https://github.com/git-lfs/git-lfs/releases/download/v${GIT_LFS_VERSION}/git-lfs-linux-${arch}-v${GIT_LFS_VERSION}.tar.gz" \
   && tar xzf git-lfs.tgz \
   && bash git-lfs-*/install.sh \
+  && git lfs install --skip-repo --system \
   && rm -rf git-lfs*
 
 ENV LANG=C.UTF-8
@@ -76,6 +99,7 @@ ENV LANG=C.UTF-8
 ARG TARGETARCH
 ARG COMMIT_SHA
 
+# inter6 - custom uid/gid (1026/65536)
 ARG user=jenkins
 ARG group=jenkins
 ARG uid=1026
@@ -89,7 +113,7 @@ ENV JENKINS_HOME=$JENKINS_HOME
 ENV JENKINS_SLAVE_AGENT_PORT=${agent_port}
 ENV REF=$REF
 
-# Jenkins is run with user `jenkins`, uid = 1000
+# Jenkins is run with user `jenkins`
 # If you bind mount a volume from the host or a data container,
 # ensure you use the same uid
 RUN mkdir -p $JENKINS_HOME \
@@ -106,34 +130,17 @@ VOLUME $JENKINS_HOME
 # or config file with your custom jenkins Docker image.
 RUN mkdir -p ${REF}/init.groovy.d
 
-# jenkins version being bundled in this docker image
-ARG JENKINS_VERSION
-ENV JENKINS_VERSION=${JENKINS_VERSION:-2.479}
-
-# jenkins.war checksum, download will be validated using it
-ARG JENKINS_SHA=910ea36cef37c45087e39d65e335988e036fccea47c79cc5a52e721a10cb1b49
-
-# Can be used to customize where jenkins.war get downloaded from
-ARG JENKINS_URL=https://repo.jenkins-ci.org/public/org/jenkins-ci/main/jenkins-war/${JENKINS_VERSION}/jenkins-war-${JENKINS_VERSION}.war
-
-# could use ADD but this one does not check Last-Modified header neither does it allow to control checksum
-# see https://github.com/docker/docker/issues/8331
-RUN curl -fsSL ${JENKINS_URL} -o /usr/share/jenkins/jenkins.war \
-  && echo "${JENKINS_SHA}  /usr/share/jenkins/jenkins.war" >/tmp/jenkins_sha \
-  && sha256sum -c --strict /tmp/jenkins_sha \
-  && rm -f /tmp/jenkins_sha
-
 ENV JENKINS_UC=https://updates.jenkins.io
 ENV JENKINS_UC_EXPERIMENTAL=https://updates.jenkins.io/experimental
 ENV JENKINS_INCREMENTALS_REPO_MIRROR=https://repo.jenkins-ci.org/incrementals
 RUN chown -R ${user} "$JENKINS_HOME" "$REF"
 
-ARG PLUGIN_CLI_VERSION=2.13.2
+ARG PLUGIN_CLI_VERSION=2.15.0
 ARG PLUGIN_CLI_URL=https://github.com/jenkinsci/plugin-installation-manager-tool/releases/download/${PLUGIN_CLI_VERSION}/jenkins-plugin-manager-${PLUGIN_CLI_VERSION}.jar
 RUN curl -fsSL ${PLUGIN_CLI_URL} -o /opt/jenkins-plugin-manager.jar \
-  && echo "$(curl -fsSL "${PLUGIN_CLI_URL}.sha256")  /opt/jenkins-plugin-manager.jar" >/tmp/jenkins_sha \
-  && sha256sum -c --strict /tmp/jenkins_sha \
-  && rm -f /tmp/jenkins_sha
+  && echo "$(curl -fsSL "${PLUGIN_CLI_URL}.sha256")  /opt/jenkins-plugin-manager.jar" >/tmp/jpm_sha \
+  && sha256sum -c --strict /tmp/jpm_sha \
+  && rm -f /tmp/jpm_sha
 
 # for main web interface:
 EXPOSE ${http_port}
@@ -145,13 +152,17 @@ ENV COPY_REFERENCE_FILE_LOG=$JENKINS_HOME/copy_reference_file.log
 
 ENV JAVA_HOME=/opt/java/openjdk
 ENV PATH="${JAVA_HOME}/bin:${PATH}"
-COPY --from=jre-build /javaruntime $JAVA_HOME
+COPY --from=jre-and-war /javaruntime $JAVA_HOME
+COPY --from=jre-and-war /war/jenkins.war /usr/share/jenkins/jenkins.war
 
 USER ${user}
 
 COPY jenkins-support /usr/local/bin/jenkins-support
 COPY jenkins.sh /usr/local/bin/jenkins.sh
 COPY jenkins-plugin-cli.sh /bin/jenkins-plugin-cli
+
+ARG JENKINS_VERSION=2.572
+ENV JENKINS_VERSION=${JENKINS_VERSION}
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/jenkins.sh"]
 

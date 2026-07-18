@@ -81,14 +81,6 @@ variable "WINDOWS_VERSION_OVERRIDE" {
 }
 
 ## inter6-specific variables (used by the debian_inter6 target)
-variable "JENKINS_SHA" {
-  default = ""
-}
-
-variable "BOOKWORM_TAG" {
-  default = "20250317"
-}
-
 variable "TAG_VERSION" {
   default = "v1"
 }
@@ -192,20 +184,22 @@ target "windowsservercore" {
   platforms = ["windows/amd64"]
 }
 
-# inter6-specific target: standalone Debian Bookworm based image
-target "debian_inter6_jdk21" {
-  dockerfile = "debian/bookworm-inter6/hotspot/Dockerfile"
+# inter6-specific target: standalone Debian based image (rebased on debian/Dockerfile)
+target "debian_inter6_jdk25" {
+  dockerfile = "debian/inter6/Dockerfile"
   context    = "."
   args = {
-    JENKINS_VERSION    = JENKINS_VERSION
-    JENKINS_SHA        = JENKINS_SHA
-    COMMIT_SHA         = COMMIT_SHA
-    PLUGIN_CLI_VERSION = PLUGIN_CLI_VERSION
-    BOOKWORM_TAG       = BOOKWORM_TAG
-    JAVA_VERSION       = JAVA21_VERSION
+    JENKINS_VERSION     = JENKINS_VERSION
+    WAR_URL             = war_url()
+    COMMIT_SHA          = COMMIT_SHA
+    PLUGIN_CLI_VERSION  = PLUGIN_CLI_VERSION
+    JAVA_VERSION        = JAVA25_VERSION
+    DEBIAN_RELEASE_LINE = DEBIAN_RELEASE_LINE
+    DEBIAN_VERSION      = DEBIAN_VERSION
+    DEBIAN_VARIANT      = "-slim"
   }
   tags = [
-    tag(true, "inter6-jdk21-${TAG_VERSION}"),
+    tag(true, "inter6-jdk25-${TAG_VERSION}"),
   ]
   platforms = ["linux/amd64"]
 }
@@ -216,7 +210,7 @@ group "linux" {
     "alpine",
     "debian",
     "rhel",
-    "debian_inter6_jdk21",
+    "debian_inter6_jdk25",
   ]
 }
 
