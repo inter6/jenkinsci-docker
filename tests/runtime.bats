@@ -1,10 +1,12 @@
 #!/usr/bin/env bats
 
+# bats file_tags=test-suite:runtime
+
 load 'test_helper/bats-support/load'
 load 'test_helper/bats-assert/load'
 load test_helpers
 
-IMAGE=${IMAGE:-debian_jdk17}
+IMAGE=${IMAGE:-debian_jdk21}
 SUT_IMAGE=$(get_sut_image)
 SUT_DESCRIPTION="${IMAGE}-runtime"
 
@@ -37,6 +39,16 @@ teardown() {
   cleanup "${container_name}"
   # need the last line of output
   assert "${version}" docker run --rm --env JENKINS_OPTS="--help --version" --name "${container_name}" -P $SUT_IMAGE | tail -n 1
+}
+
+# bats test_tags=test-type:golden-file
+@test "[${SUT_DESCRIPTION}] ensure expected environment variables are set" {
+  local container_name
+  container_name="$(get_sut_container_name)"
+  cleanup "${container_name}"
+
+  # Excluding HOSTNAME as its value is variable, and 'container=oci' existing only in RHEL images
+  assert_matches_golden expected_env_vars_except_hostname docker run --rm --name "${container_name}" "${SUT_IMAGE}" bash -c "env | sort | grep -v -e HOSTNAME -e container=oci"
 }
 
 @test "[${SUT_DESCRIPTION}] test jenkins arguments" {
@@ -105,6 +117,7 @@ runInScriptConsole() {
   bash -c "curl -fssL -X POST -u \"admin:$PASSWORD\" --cookie \"$COOKIEJAR\" -H \"$CRUMB\" \"$SERVER\"/scriptText -d script=\"$1\" | sed -e 's/Result: //'"
 }
 
+# bats test_tags=use:start-jenkins-with-jvm-opts
 @test "[${SUT_DESCRIPTION}] passes JAVA_OPTS as JVM options" {
   start-jenkins-with-jvm-opts --env JAVA_OPTS="-Duser.timezone=Europe/Madrid -Dhudson.model.DirectoryBrowserSupport.CSP=\"default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline';\""
 
@@ -113,6 +126,7 @@ runInScriptConsole() {
   assert 'Europe/Madrid' get-timezone-value
 }
 
+# bats test_tags=use:start-jenkins-with-jvm-opts
 @test "[${SUT_DESCRIPTION}] passes JENKINS_JAVA_OPTS as JVM options" {
   start-jenkins-with-jvm-opts --env JENKINS_JAVA_OPTS="-Duser.timezone=Europe/Madrid -Dhudson.model.DirectoryBrowserSupport.CSP=\"default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline';\""
 
@@ -121,6 +135,7 @@ runInScriptConsole() {
   assert 'Europe/Madrid' get-timezone-value
 }
 
+# bats test_tags=use:start-jenkins-with-jvm-opts
 @test "[${SUT_DESCRIPTION}] JENKINS_JAVA_OPTS overrides JAVA_OPTS" {
   start-jenkins-with-jvm-opts \
     --env JAVA_OPTS="-Duser.timezone=Europe/Madrid -Dhudson.model.DirectoryBrowserSupport.CSP=\"default-src 'self'\"" \
@@ -129,6 +144,18 @@ runInScriptConsole() {
   # JAVA_OPTS and JENKINS_JAVA_OPTS are used
   assert "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline';" get-csp-value
   assert 'Europe/Madrid' get-timezone-value
+}
+
+@test "[${SUT_DESCRIPTION}] git-lfs is configured system-wide for all users" {
+  # LFS filters must not be empty when running as the jenkins user (default)
+  run docker run --rm "${SUT_IMAGE}" sh -c 'git lfs env | grep "git config filter.lfs"'
+  assert_success
+  refute_output --regexp 'git config filter\.lfs\.\w+ = ""'
+
+  # /etc/gitconfig must contain the LFS filter section
+  run docker run --rm "${SUT_IMAGE}" cat /etc/gitconfig
+  assert_success
+  assert_output --partial '[filter "lfs"]'
 }
 
 @test "[${SUT_DESCRIPTION}] ensure that 'ps' command is available" {

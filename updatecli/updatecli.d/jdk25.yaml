@@ -1,4 +1,4 @@
-name: Bump JDK21 version
+name: Bump JDK25 version
 
 scms:
   default:
@@ -13,21 +13,21 @@ scms:
       branch: "{{ .github.branch }}"
 
 sources:
-  lastTemurin21Version:
+  lastTemurin25Version:
     kind: temurin
-    name: Get the latest Adoptium JDK21 version via the API
+    name: Get the latest Adoptium JDK25 version via the API
     spec:
-      featureversion: 21
+      featureversion: 25
     transformers:
       - trimprefix: "jdk-"
 
 conditions:
   checkTemurinAllReleases:
-    name: Check if the "<lastTemurin21Version>" is available for all platforms
+    name: Check if the "<lastTemurin25Version>" is available for all platforms
     kind: temurin
-    sourceid: lastTemurin21Version
+    sourceid: lastTemurin25Version
     spec:
-      featureversion: 21
+      featureversion: 25
       platforms:
         - alpine-linux/x64
         - alpine-linux/aarch64
@@ -38,8 +38,8 @@ conditions:
         - windows/x64
 
 targets:
-  setJDK21VersionDockerBake:
-    name: "Bump JDK21 version for Linux images in the docker-bake.hcl file"
+  setJDK25VersionDockerBake:
+    name: "Bump JDK25 version for Linux images in the docker-bake.hcl file"
     kind: hcl
     transformers:
       - replacer:
@@ -47,32 +47,15 @@ targets:
           to: "_"
     spec:
       file: docker-bake.hcl
-      path: variable.JAVA21_VERSION.default
-    scmid: default
-  setJDK21Version:
-    name: "Bump JDK21 version in Dockerfiles"
-    kind: dockerfile
-    transformers:
-      - replacer:
-          from: "+"
-          to: "_"
-    spec:
-      files:
-        - alpine/hotspot/Dockerfile
-        - debian/Dockerfile
-        - rhel/Dockerfile
-        - windows/windowsservercore/hotspot/Dockerfile
-      instruction:
-        keyword: ARG
-        matcher: JAVA_VERSION
+      path: variable.JAVA25_VERSION.default
     scmid: default
 
 actions:
   default:
     kind: github/pullrequest
     scmid: default
-    title: Bump JDK21 version to {{ source "lastTemurin21Version" }}
+    title: Bump JDK25 version to {{ source "lastTemurin25Version" }}
     spec:
       labels:
         - dependencies
-        - jdk21
+        - jdk25

@@ -6,25 +6,29 @@ on:
     # Run once per week (to avoid alert fatigue)
     - cron: '0 2 * * 1' # Every Monday at 2am UTC
   push:
+    branches:
+      - master
   pull_request:
+    branches:
+      - master
 jobs:
   updatecli:
     runs-on: ubuntu-latest
     if: github.repository_owner == 'jenkinsci'
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Install Updatecli in the runner
-        uses: updatecli/updatecli-action@v2.96.0
+        uses: updatecli/updatecli-action@v3.3.0
 
       - name: Run Updatecli in Dry Run mode
-        run: updatecli diff --config ./updatecli/updatecli.d --values ./updatecli/values.github-action.yaml
+        run: updatecli pipeline diff --config ./updatecli/updatecli.d --values ./updatecli/values.github-action.yaml
         env:
           UPDATECLI_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run Updatecli in Apply mode
         if: github.ref == 'refs/heads/master'
-        run: updatecli apply --config ./updatecli/updatecli.d --values ./updatecli/values.github-action.yaml
+        run: updatecli pipeline apply --config ./updatecli/updatecli.d --values ./updatecli/values.github-action.yaml
         env:
           UPDATECLI_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -11,6 +11,7 @@ set -eu -o pipefail
 
 : "${DOCKERHUB_ORGANISATION:=jenkins}"
 : "${DOCKERHUB_REPO:=jenkins}"
+: "${BAKE_TARGET:=linux}"
 
 export JENKINS_REPO="${DOCKERHUB_ORGANISATION}/${DOCKERHUB_REPO}"
 
@@ -28,7 +29,7 @@ debug=false
 
 while [[ $# -gt 0 ]]; do
     key="$1"
-    case $key in
+    case "${key}" in
         -n)
         dry_run=true
         ;;
@@ -36,7 +37,7 @@ while [[ $# -gt 0 ]]; do
         debug=true
         ;;
         *)
-        echo "ERROR: Unknown option: $key"
+        echo "ERROR: Unknown option: ${key}"
         exit 1
         ;;
     esac
@@ -44,12 +45,12 @@ while [[ $# -gt 0 ]]; do
 done
 
 
-if [ "$debug" = true ]; then
+if [[ "${debug}" = true ]]; then
     echo "Debug mode enabled"
     set -x
 fi
 
-if [ "$dry_run" = true ]; then
+if [[ "${dry_run}" = true ]]; then
     echo "Dry run, will not publish images"
 fi
 
@@ -76,24 +77,44 @@ else
 fi
 
 build_opts=("--pull")
+metadata_suffix="publish"
 if test "${dry_run}" == "true"; then
-    build_opts+=("--load")
+    build_opts+=("--set=*.output=type=cacheonly")
+    metadata_suffix="dry-run"
 else
     build_opts+=("--push")
 fi
 
-WAR_SHA="$(curl --disable --fail --silent --show-error --location "https://repo.jenkins-ci.org/releases/org/jenkins-ci/main/jenkins-war/${JENKINS_VERSION}/jenkins-war-${JENKINS_VERSION}.war.sha256")"
+# Save build result metadata
+mkdir -p target
+BUILD_METADATA_PATH="target/build-result-metadata_${BAKE_TARGET}_${metadata_suffix}.json"
+build_opts+=("--metadata-file=${BUILD_METADATA_PATH}")
+
 COMMIT_SHA=$(git rev-parse HEAD)
-export COMMIT_SHA JENKINS_VERSION WAR_SHA LATEST_WEEKLY LATEST_LTS
+export COMMIT_SHA JENKINS_VERSION LATEST_WEEKLY LATEST_LTS BUILD_METADATA_PATH
 
 cat <<EOF
 Using the following settings:
 * JENKINS_REPO: ${JENKINS_REPO}
 * JENKINS_VERSION: ${JENKINS_VERSION}
-* WAR_SHA: ${WAR_SHA}
 * COMMIT_SHA: ${COMMIT_SHA}
 * LATEST_WEEKLY: ${LATEST_WEEKLY}
 * LATEST_LTS: ${LATEST_LTS}
+* BUILD_METADATA_PATH: ${BUILD_METADATA_PATH}
+* BAKE_TARGET: ${BAKE_TARGET}
+* BAKE OPTIONS:
+$(printf '  %s\n' "${build_opts[@]}")
 EOF
 
-docker buildx bake --file docker-bake.hcl "${build_opts[@]}" linux
+echo '* RESOLVED BAKE CONFIG:'
+docker buildx bake --file docker-bake.hcl --progress=quiet --print "${BAKE_TARGET}"
+
+if [[ "${CI:-false}" == "false" ]]; then
+  read -rp "Confirm? [y/N] " answer
+
+  if [[ ! "${answer}" =~ ^[Yy]$ ]]; then
+      exit 0
+  fi
+fi
+
+docker buildx bake --file docker-bake.hcl "${build_opts[@]}" "${BAKE_TARGET}"

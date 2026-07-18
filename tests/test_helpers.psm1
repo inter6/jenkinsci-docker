@@ -5,11 +5,11 @@ function Test-CommandExists($command) {
   $ErrorActionPreference = 'stop'
   $res = $false
   try {
-      if(Get-Command $command) { 
-          $res = $true 
+      if(Get-Command $command) {
+          $res = $true
       }
   } catch {
-      $res = $false 
+      $res = $false
   } finally {
       $ErrorActionPreference=$oldPreference
   }
@@ -24,7 +24,7 @@ if(-Not (Test-CommandExists docker)) {
 function Retry-Command {
     [CmdletBinding()]
     param (
-        [parameter(Mandatory, ValueFromPipeline)] 
+        [parameter(Mandatory, ValueFromPipeline)]
         [ValidateNotNullOrEmpty()]
         [scriptblock] $ScriptBlock,
         [int] $RetryCount = 3,
@@ -32,16 +32,16 @@ function Retry-Command {
         [string] $SuccessMessage = "Command executed successfully!",
         [string] $FailureMessage = "Failed to execute the command"
         )
-        
+
     process {
         $Attempt = 1
         $Flag = $true
-        
+
         do {
             try {
                 $PreviousPreference = $ErrorActionPreference
                 $ErrorActionPreference = 'Stop'
-                Invoke-Command -NoNewScope -ScriptBlock $ScriptBlock -OutVariable Result 4>&1              
+                Invoke-Command -NoNewScope -ScriptBlock $ScriptBlock -OutVariable Result 4>&1
                 $ErrorActionPreference = $PreviousPreference
 
                 # flow control will execute the next line only if the command in the scriptblock executed without any errors
@@ -66,8 +66,9 @@ function Retry-Command {
 }
 
 function Get-SutImage {
-    $DOCKERFILE = Get-EnvOrDefault 'DOCKERFILE' ''
-    $IMAGENAME = Get-EnvOrDefault 'CONTROLLER_IMAGE' '' # Ex: jdk17-hotspot-windowsservercore-ltsc2019
+    # TODO: don't hardcode Windows flavor
+    $DOCKERFILE = 'windows/windowsservercore/hotspot/Dockerfile'
+    $IMAGETAG = Get-EnvOrDefault 'CONTROLLER_TAG' ''
 
     $REAL_DOCKERFILE=Resolve-Path -Path "$PSScriptRoot/../${DOCKERFILE}"
 
@@ -76,27 +77,27 @@ function Get-SutImage {
         exit 1
     }
 
-    return "pester-jenkins-$IMAGENAME"
+    return "pester-jenkins-$IMAGETAG"
 }
 
 function Run-Program($cmd, $params, $verbose=$false) {
     if($verbose) {
         Write-Host "$cmd $params"
     }
-    $psi = New-Object System.Diagnostics.ProcessStartInfo 
-    $psi.CreateNoWindow = $true 
-    $psi.UseShellExecute = $false 
-    $psi.RedirectStandardOutput = $true 
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.CreateNoWindow = $true
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
     $psi.WorkingDirectory = (Get-Location)
-    $psi.FileName = $cmd 
+    $psi.FileName = $cmd
     $psi.Arguments = $params
-    $proc = New-Object System.Diagnostics.Process 
-    $proc.StartInfo = $psi 
+    $proc = New-Object System.Diagnostics.Process
+    $proc.StartInfo = $psi
     [void]$proc.Start()
-    $stdout = $proc.StandardOutput.ReadToEnd() 
+    $stdout = $proc.StandardOutput.ReadToEnd()
     $stderr = $proc.StandardError.ReadToEnd()
-    $proc.WaitForExit() 
+    $proc.WaitForExit()
     if($proc.ExitCode -ne 0) {
         Write-Host "`n`nstdout:`n$stdout`n`nstderr:`n$stderr`n`n"
     }
@@ -105,11 +106,16 @@ function Run-Program($cmd, $params, $verbose=$false) {
 }
 
 function Build-Docker($tag) {
-    $exitCode, $stdout, $stderr = Run-Program 'docker-compose' '--file=build-windows.yaml build --parallel'
+    $windowsVersion = '2022'
+    if ($tag -match 'ltsc(\d+)$') {
+        $windowsVersion = $matches[1]
+    }
+    $composeParams = '--file=build-windows_windowsservercore-ltsc{0}.yaml build --parallel' -f $windowsVersion
+    $exitCode, $stdout, $stderr = Run-Program 'docker-compose' $composeParams
     if($exitCode -ne 0) {
         return $exitCode, $stdout, $stderr
     }
-    return(Run-Program 'docker' $('tag {0}/{1}:{2} {3}' -f $env:DOCKERHUB_ORGANISATION, $env:DOCKERHUB_REPO, $env:CONTROLLER_IMAGE, $tag))
+    return(Run-Program 'docker' $('tag {0}:{1} {2}' -f $env:DOCKERHUB_ORG_REPO, $env:CONTROLLER_TAG, $tag))
 }
 
 function Build-DockerChild($tag, $dir) {
@@ -150,7 +156,7 @@ function Run-In-Script-Console($Container, $Script) {
             return $res.Content.replace('Result: ', '')
         }
     }
-    return $null    
+    return $null
 }
 
 function Test-Url($Container, $Url) {
@@ -165,10 +171,10 @@ function Test-Url($Container, $Url) {
         $res = Invoke-WebRequest -Uri $('{0}{1}' -f $jenkinsUrl, $Url) -Headers $Headers -TimeoutSec 60 -Method Head -UseBasicParsing
         if($res.StatusCode -eq 200) {
             return $true
-        } 
+        }
     }
     Write-Error "URL $(Get-JenkinsUrl $Container)$Url failed"
-    return $false    
+    return $false
 }
 
 function Cleanup($image) {
@@ -176,6 +182,6 @@ function Cleanup($image) {
     docker rm -fv "$image" 2>&1 | Out-Null
 }
 
-function Unzip-Manifest($Container, $Plugin, $Work) {
-    return (Run-Program "docker.exe" "run --rm -v `"${Work}:C:\ProgramData\Jenkins\JenkinsHome`" $Container mkdir C:/ProgramData/Jenkins/temp | Out-Null ; Copy-Item C:/ProgramData/Jenkins/JenkinsHome/plugins/$Plugin C:/ProgramData/Jenkins/temp/$Plugin.zip ; Expand-Archive C:/ProgramData/Jenkins/temp/$Plugin.zip -Destinationpath C:/ProgramData/Jenkins/temp ; `$content = Get-Content C:/ProgramData/Jenkins/temp/META-INF/MANIFEST.MF ; Remove-Item -Force -Recurse C:/ProgramData/Jenkins/temp ; Write-Host `$content ; exit 0")
+function Unzip-Manifest($Container, $Plugin, $DockerVolume) {
+    return (Run-Program "docker.exe" "run --rm -v `"${DockerVolume}:C:\ProgramData\Jenkins\JenkinsHome`" $Container mkdir C:/ProgramData/Jenkins/temp | Out-Null ; Copy-Item C:/ProgramData/Jenkins/JenkinsHome/plugins/$Plugin C:/ProgramData/Jenkins/temp/$Plugin.zip ; Expand-Archive C:/ProgramData/Jenkins/temp/$Plugin.zip -Destinationpath C:/ProgramData/Jenkins/temp ; `$content = Get-Content C:/ProgramData/Jenkins/temp/META-INF/MANIFEST.MF ; Remove-Item -Force -Recurse C:/ProgramData/Jenkins/temp ; Write-Host `$content ; exit 0")
 }
