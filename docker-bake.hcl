@@ -77,6 +77,11 @@ variable "JAVA_RELEASE_OVERRIDE" {
   default = ""
 }
 
+## inter6-specific variables (used by the debian_inter6 target)
+variable "TAG_VERSION" {
+  default = "v1"
+}
+
 variable "debian_variants" {
   default = ["debian", "debian-slim"]
 }
@@ -168,12 +173,33 @@ target "windowsservercore" {
   platforms = ["windows/amd64"]
 }
 
+# inter6-specific target: standalone Debian based image (rebased on debian/Dockerfile)
+target "debian_inter6_jdk25" {
+  dockerfile = "debian/inter6/Dockerfile"
+  context    = "."
+  args = {
+    JENKINS_VERSION     = JENKINS_VERSION
+    WAR_URL             = war_url()
+    COMMIT_SHA          = COMMIT_SHA
+    PLUGIN_CLI_VERSION  = PLUGIN_CLI_VERSION
+    JAVA_RELEASE        = 25
+    DEBIAN_RELEASE_LINE = DEBIAN_RELEASE_LINE
+    DEBIAN_VERSION      = DEBIAN_VERSION
+    DEBIAN_VARIANT      = "-slim"
+  }
+  tags = [
+    tag(true, "inter6-jdk25-${TAG_VERSION}"),
+  ]
+  platforms = ["linux/amd64"]
+}
+
 ## Groups
 group "linux" {
   targets = [
     "alpine",
     "debian",
     "rhel",
+    "debian_inter6_jdk25",
   ]
 }
 
